@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8" /><title>Worker 自测</title></head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      import { COURSE_SPECS, PERSONAS, generateCourse } from '/src/engine/courses.ts';
+      const out = document.getElementById('out');
+      const log = (s) => { out.textContent += '\n' + s; };
+      try {
+        const worker = new Worker(new URL('/src/workers/optimizer.worker.ts', import.meta.url), { type: 'module' });
+        const course = generateCourse(COURSE_SPECS.find((c) => c.id === 'sl-classic'));
+        const persona = PERSONAS[1];
+        const t0 = performance.now();
+        worker.postMessage({ type: 'optimize', requestId: 1, course, persona, budgetMs: 3000 });
+        worker.onmessage = (ev) => {
+          if (ev.data.type === 'optimized') {
+            const ms = performance.now() - t0;
+            const r = ev.data;
+            log(`worker ok: gates=${r.line.gateAnalysis.length}`);
+            log(`time=${r.line.totalTime.toFixed(2)}s baseline=${r.baselineTime.toFixed(2)}s improve=${(r.improvementPct * 100).toFixed(1)}%`);
+            log(`computeMs=${r.line.computeMs} wallMs=${ms.toFixed(0)} cleared=${r.line.allGatesCleared} corridorViol=${r.line.corridorViolations}`);
+            // 再测比赛模拟消息
+            worker.postMessage({ type: 'race', requestId: 2, course, persona, line: r.line, seed: 42 });
+          } else if (ev.data.type === 'raced') {
+            const rr = ev.data.result;
+            log(`race: finished=${rr.finished} time=${rr.finishTime?.toFixed(2) ?? 'DNF'} corrections=${rr.corrections.length} snaps=${rr.snapshots.length} maxV=${rr.maxSpeed.toFixed(1)}`);
+            log(rr.finished ? 'ALL PASS' : `DNF: ${rr.dnfReason}`);
+            document.title = 'SELFTEST_DONE';
+          }
+        };
+        worker.onerror = (e) => { log('WORKER ERROR: ' + e.message); document.title = 'SELFTEST_FAIL'; };
+      } catch (e) {
+        log('PAGE ERROR: ' + e.message + '\n' + e.stack);
+        document.title = 'SELFTEST_FAIL';
+      }
+    </script>
+  </body>
+</html>
